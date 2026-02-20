@@ -199,7 +199,7 @@ const file_auth0support_proto_rawDesc = "" +
 	"\fAuth0Support\x12Y\n" +
 	"\n" +
 	"CreateUser\x12$.auth0support.Auth0CreateUserRequest\x1a%.auth0support.Auth0CreateUserResponse\x12\\\n" +
-	"\x10KeepaliveSources\x12%.account.AdminKeepaliveSourcesRequest\x1a!.account.KeepaliveSourcesResponseB1Z/github.com/overmindtech/terraform-provider-overmind/go/sdp-go;sdpb\x06proto3"
+	"\x10KeepaliveSources\x12%.account.AdminKeepaliveSourcesRequest\x1a!.account.KeepaliveSourcesResponseB1Z/github.com/overmindtech/workspace/go/sdp-go;sdpb\x06proto3"
 
 var (
 	file_auth0support_proto_rawDescOnce sync.Once

@@ -130,7 +130,7 @@ const file_cached_entry_proto_rawDesc = "" +
 	"\x16unique_attribute_value\x18\x04 \x01(\tR\x14uniqueAttributeValue\x12$\n" +
 	"\x06method\x18\x05 \x01(\x0e2\f.QueryMethodR\x06method\x12\x14\n" +
 	"\x05query\x18\x06 \x01(\tR\x05query\x12\x19\n" +
-	"\bsst_hash\x18\a \x01(\tR\asstHashB1Z/github.com/overmindtech/terraform-provider-overmind/go/sdp-go;sdpb\x06proto3"
+	"\bsst_hash\x18\a \x01(\tR\asstHashB1Z/github.com/overmindtech/workspace/go/sdp-go;sdpb\x06proto3"
 
 var (
 	file_cached_entry_proto_rawDescOnce sync.Once

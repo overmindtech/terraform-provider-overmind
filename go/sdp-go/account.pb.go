@@ -4476,7 +4476,7 @@ const file_account_proto_rawDesc = "" +
 	"\x1bGetWelcomeScreenInformation\x12+.account.GetWelcomeScreenInformationRequest\x1a,.account.GetWelcomeScreenInformationResponse\x12l\n" +
 	"\x17SetGithubInstallationID\x12'.account.SetGithubInstallationIDRequest\x1a(.account.SetGithubInstallationIDResponse\x12r\n" +
 	"\x19UnsetGithubInstallationID\x12).account.UnsetGithubInstallationIDRequest\x1a*.account.UnsetGithubInstallationIDResponse\x12o\n" +
-	"\x18GetOrCreateAWSExternalId\x12(.account.GetOrCreateAWSExternalIdRequest\x1a).account.GetOrCreateAWSExternalIdResponseB1Z/github.com/overmindtech/terraform-provider-overmind/go/sdp-go;sdpb\x06proto3"
+	"\x18GetOrCreateAWSExternalId\x12(.account.GetOrCreateAWSExternalIdRequest\x1a).account.GetOrCreateAWSExternalIdResponseB1Z/github.com/overmindtech/workspace/go/sdp-go;sdpb\x06proto3"
 
 var (
 	file_account_proto_rawDescOnce sync.Once
