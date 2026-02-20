@@ -7037,7 +7037,7 @@ const file_changes_proto_rawDesc = "" +
 	"\x0fUpdateLabelRule\x12\x1f.changes.UpdateLabelRuleRequest\x1a .changes.UpdateLabelRuleResponse\x12T\n" +
 	"\x0fDeleteLabelRule\x12\x1f.changes.DeleteLabelRuleRequest\x1a .changes.DeleteLabelRuleResponse\x12P\n" +
 	"\rTestLabelRule\x12\x1d.changes.TestLabelRuleRequest\x1a\x1e.changes.TestLabelRuleResponse0\x01\x12x\n" +
-	"\x1bReapplyLabelRuleInTimeRange\x12+.changes.ReapplyLabelRuleInTimeRangeRequest\x1a,.changes.ReapplyLabelRuleInTimeRangeResponseB1Z/github.com/overmindtech/terraform-provider-overmind/go/sdp-go;sdpb\x06proto3"
+	"\x1bReapplyLabelRuleInTimeRange\x12+.changes.ReapplyLabelRuleInTimeRangeRequest\x1a,.changes.ReapplyLabelRuleInTimeRangeResponseB1Z/github.com/overmindtech/workspace/go/sdp-go;sdpb\x06proto3"
 
 var (
 	file_changes_proto_rawDescOnce sync.Once

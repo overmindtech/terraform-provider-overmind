@@ -1171,7 +1171,7 @@ const file_signal_proto_rawDesc = "" +
 	"\x0eGetItemSignals\x12\x1d.signal.GetItemSignalsRequest\x1a\x1e.signal.GetItemSignalsResponse\x12U\n" +
 	"\x10GetItemSignalsV2\x12\x1f.signal.GetItemSignalsRequestV2\x1a .signal.GetItemSignalsResponseV2\x12s\n" +
 	"\x1aGetCustomSignalsByCategory\x12).signal.GetCustomSignalsByCategoryRequest\x1a*.signal.GetCustomSignalsByCategoryResponse\x12a\n" +
-	"\x14GetItemSignalDetails\x12#.signal.GetItemSignalDetailsRequest\x1a$.signal.GetItemSignalDetailsResponseB1Z/github.com/overmindtech/terraform-provider-overmind/go/sdp-go;sdpb\x06proto3"
+	"\x14GetItemSignalDetails\x12#.signal.GetItemSignalDetailsRequest\x1a$.signal.GetItemSignalDetailsResponseB1Z/github.com/overmindtech/workspace/go/sdp-go;sdpb\x06proto3"
 
 var (
 	file_signal_proto_rawDescOnce sync.Once

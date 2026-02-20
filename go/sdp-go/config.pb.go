@@ -1794,7 +1794,7 @@ const file_config_proto_rawDesc = "" +
 	"\x12UpdateSignalConfig\x12!.config.UpdateSignalConfigRequest\x1a\".config.UpdateSignalConfigResponse\x12j\n" +
 	"\x17GetGithubAppInformation\x12&.config.GetGithubAppInformationRequest\x1a'.config.GetGithubAppInformationResponse\x12s\n" +
 	"\x1aRegenerateGithubAppProfile\x12).config.RegenerateGithubAppProfileRequest\x1a*.config.RegenerateGithubAppProfileResponse\x12\xac\x01\n" +
-	"-DeleteGithubAppProfileAndGithubInstallationID\x12<.config.DeleteGithubAppProfileAndGithubInstallationIDRequest\x1a=.config.DeleteGithubAppProfileAndGithubInstallationIDResponseB1Z/github.com/overmindtech/terraform-provider-overmind/go/sdp-go;sdpb\x06proto3"
+	"-DeleteGithubAppProfileAndGithubInstallationID\x12<.config.DeleteGithubAppProfileAndGithubInstallationIDRequest\x1a=.config.DeleteGithubAppProfileAndGithubInstallationIDResponseB1Z/github.com/overmindtech/workspace/go/sdp-go;sdpb\x06proto3"
 
 var (
 	file_config_proto_rawDescOnce sync.Once

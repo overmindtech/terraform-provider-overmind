@@ -373,7 +373,7 @@ const file_revlink_proto_rawDesc = "" +
 	"\x0fGetReverseEdges\x12\x1f.revlink.GetReverseEdgesRequest\x1a .revlink.GetReverseEdgesResponse\x12j\n" +
 	"\x16IngestGatewayResponses\x12%.revlink.IngestGatewayResponseRequest\x1a'.revlink.IngestGatewayResponsesResponse(\x01\x12E\n" +
 	"\n" +
-	"Checkpoint\x12\x1a.revlink.CheckpointRequest\x1a\x1b.revlink.CheckpointResponseB1Z/github.com/overmindtech/terraform-provider-overmind/go/sdp-go;sdpb\x06proto3"
+	"Checkpoint\x12\x1a.revlink.CheckpointRequest\x1a\x1b.revlink.CheckpointResponseB1Z/github.com/overmindtech/workspace/go/sdp-go;sdpb\x06proto3"
 
 var (
 	file_revlink_proto_rawDescOnce sync.Once

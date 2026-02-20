@@ -256,7 +256,7 @@ const file_area51_proto_rawDesc = "" +
 	"\x18GetChangeArchiveResponse\x12;\n" +
 	"\rchangeArchive\x18\x01 \x01(\v2\x15.area51.ChangeArchiveR\rchangeArchive2f\n" +
 	"\rArea51Service\x12U\n" +
-	"\x10GetChangeArchive\x12\x1f.area51.GetChangeArchiveRequest\x1a .area51.GetChangeArchiveResponseB1Z/github.com/overmindtech/terraform-provider-overmind/go/sdp-go;sdpb\x06proto3"
+	"\x10GetChangeArchive\x12\x1f.area51.GetChangeArchiveRequest\x1a .area51.GetChangeArchiveResponseB1Z/github.com/overmindtech/workspace/go/sdp-go;sdpb\x06proto3"
 
 var (
 	file_area51_proto_rawDescOnce sync.Once
