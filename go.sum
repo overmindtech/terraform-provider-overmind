@@ -981,6 +981,8 @@ github.com/refraction-networking/utls v1.8.2 h1:j4Q1gJj0xngdeH+Ox/qND11aEfhpgoEv
 github.com/refraction-networking/utls v1.8.2/go.mod h1:jkSOEkLqn+S/jtpEHPOsVv/4V4EVnelwbMQl4vCWXAM=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
+github.com/resend/resend-go/v3 v3.1.1 h1:Uwpf/tZU+O/r/3nMWE6zUAMIG9dX/vTBS3wlQzYJKSw=
+github.com/resend/resend-go/v3 v3.1.1/go.mod h1:iI7VA0NoGjWvsNii5iNC5Dy0llsI3HncXPejhniYzwE=
 github.com/riverqueue/apiframe v0.0.0-20251229202423-2b52ce1c482e h1:OwOgxT3MRpOj5Mp6DhFdZP43FOQOf2hhywAuT5XZCR4=
 github.com/riverqueue/apiframe v0.0.0-20251229202423-2b52ce1c482e/go.mod h1:O7UmsAMjpMYuToN4au5GNXdmN1gli+5FTldgXqAfaD0=
 github.com/riverqueue/river v0.31.0 h1:BERwce/WS4Guter0/A3GyTDP+1rxl6vFHyBQv+U/5tM=

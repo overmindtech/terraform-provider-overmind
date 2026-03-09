@@ -527,3 +527,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+require github.com/resend/resend-go/v3 v3.1.1
