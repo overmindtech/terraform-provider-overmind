@@ -31,7 +31,7 @@ jobs:
           GPG_FINGERPRINT: 'op://global/Terraform Provider GPG Key/fingerprint'
 
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         id: import_gpg
         with:
           gpg_private_key: ${{ env.GPG_PRIVATE_KEY }}
@@ -43,9 +43,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
-          version: latest
+          # renovate: datasource=github-releases depName=goreleaser/goreleaser
+          version: "v2.14.3"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

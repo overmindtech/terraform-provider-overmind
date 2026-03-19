@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/auth0/go-jwt-middleware/v2/validator"
+	"github.com/auth0/go-jwt-middleware/v3/validator"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	log "github.com/sirupsen/logrus"
@@ -122,8 +122,7 @@ func TestNewAuthMiddleware(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	jwksURL := server.Start(ctx)
 
@@ -692,6 +691,95 @@ func (s *TestJWTServer) Start(ctx context.Context) string {
 	return s.server.URL
 }
 
+func TestWithResourceMetadata(t *testing.T) {
+	t.Parallel()
+
+	prmURL := "https://api.example.com/.well-known/oauth-protected-resource/area51/mcp"
+
+	t.Run("adds WWW-Authenticate on 401", func(t *testing.T) {
+		t.Parallel()
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"message":"JWT is missing."}`))
+		})
+
+		handler := WithResourceMetadata(prmURL, inner)
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/area51/mcp", nil)
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", rr.Code)
+		}
+
+		wwwAuth := rr.Header().Get("WWW-Authenticate")
+		expected := `Bearer resource_metadata="` + prmURL + `"`
+		if wwwAuth != expected {
+			t.Errorf("expected WWW-Authenticate %q, got %q", expected, wwwAuth)
+		}
+	})
+
+	t.Run("no WWW-Authenticate on 200", func(t *testing.T) {
+		t.Parallel()
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := WithResourceMetadata(prmURL, inner)
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/area51/mcp", nil)
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+
+		if wwwAuth := rr.Header().Get("WWW-Authenticate"); wwwAuth != "" {
+			t.Errorf("expected no WWW-Authenticate header, got %q", wwwAuth)
+		}
+	})
+
+	t.Run("no WWW-Authenticate on 403", func(t *testing.T) {
+		t.Parallel()
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		})
+
+		handler := WithResourceMetadata(prmURL, inner)
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/area51/mcp", nil)
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", rr.Code)
+		}
+
+		if wwwAuth := rr.Header().Get("WWW-Authenticate"); wwwAuth != "" {
+			t.Errorf("expected no WWW-Authenticate header on 403, got %q", wwwAuth)
+		}
+	})
+
+	t.Run("implicit 200 from Write without WriteHeader", func(t *testing.T) {
+		t.Parallel()
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("ok"))
+		})
+
+		handler := WithResourceMetadata(prmURL, inner)
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/area51/mcp", nil)
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+
+		if wwwAuth := rr.Header().Get("WWW-Authenticate"); wwwAuth != "" {
+			t.Errorf("expected no WWW-Authenticate header, got %q", wwwAuth)
+		}
+	})
+}
+
 func TestConnectErrorHandling(t *testing.T) {
 	// Create a test JWT server
 	server, err := NewTestJWTServer()
@@ -699,8 +787,7 @@ func TestConnectErrorHandling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	jwksURL := server.Start(ctx)
 

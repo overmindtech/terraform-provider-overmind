@@ -7,12 +7,13 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
-	jwtmiddleware "github.com/auth0/go-jwt-middleware/v2"
-	"github.com/auth0/go-jwt-middleware/v2/jwks"
-	"github.com/auth0/go-jwt-middleware/v2/validator"
+	jwtmiddleware "github.com/auth0/go-jwt-middleware/v3"
+	"github.com/auth0/go-jwt-middleware/v3/jwks"
+	"github.com/auth0/go-jwt-middleware/v3/validator"
 	"github.com/getsentry/sentry-go"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
@@ -40,6 +41,11 @@ type UserTokenContextKey struct{}
 // CurrentSubjectContextKey is the key that is used to store the current subject attribute.
 // This will be the auth0 `user_id` from the tokens `sub` claim.
 type CurrentSubjectContextKey struct{}
+
+// ValidatedClaimsContextKey stores the full *validator.ValidatedClaims in
+// context. In v3 the middleware's context key is unexported, so we use our own
+// for code that needs the full validated claims (e.g. token expiry lookup).
+type ValidatedClaimsContextKey struct{}
 
 // MiddlewareConfig Configuration for the auth middleware
 type MiddlewareConfig struct {
@@ -213,7 +219,7 @@ func WithAccount(account string) OverrideAuthOptionFunc {
 }
 
 // Sets the auth info in the context directly from the validated claims produced
-// by the `github.com/auth0/go-jwt-middleware/v2/validator` package. This is
+// by the `github.com/auth0/go-jwt-middleware/v3/validator` package. This is
 // essentially what the middleware already does when receiving a request, and
 // therefore should only be used in exceptional circumstances, like testing, when the
 // middleware is not being used.
@@ -223,7 +229,7 @@ func WithAccount(account string) OverrideAuthOptionFunc {
 func WithValidatedClaims(claims *validator.ValidatedClaims) OverrideAuthOptionFunc {
 	return func(ctx context.Context) context.Context {
 		customClaims := claims.CustomClaims.(*CustomClaims)
-		ctx = context.WithValue(ctx, jwtmiddleware.ContextKey{}, claims)
+		ctx = context.WithValue(ctx, ValidatedClaimsContextKey{}, claims)
 		ctx = context.WithValue(ctx, CustomClaimsContextKey{}, customClaims)
 		ctx = context.WithValue(ctx, CurrentSubjectContextKey{}, claims.RegisteredClaims.Subject)
 		ctx = context.WithValue(ctx, AccountNameContextKey{}, customClaims.AccountName)
@@ -281,9 +287,23 @@ func withCustomClaims(modify func(*CustomClaims)) OverrideAuthOptionFunc {
 //
 // This middleware also extract custom claims form the token and stores them in
 // CustomClaimsContextKey
+//
+// NOTE: This function uses log.Fatalf for startup-time configuration errors
+// because its signature returns http.Handler, not (http.Handler, error).
+// Propagating errors would require changing every caller of NewAuthMiddleware.
 func ensureValidTokenHandler(config MiddlewareConfig, next http.Handler) http.Handler {
-	if config.Auth0Domain == "" && config.IssuerURL == "" && config.Auth0Audience == "" {
-		log.Fatalf("Auth0 configuration is missing")
+	if config.BypassAuth {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			span := trace.SpanFromContext(r.Context())
+			span.SetAttributes(attribute.Bool("ovm.auth.bypass", true))
+			ctx := OverrideAuth(r.Context(), WithBypassScopeCheck())
+			next.ServeHTTP(w, r.Clone(ctx))
+		})
+	}
+
+	if config.Auth0Audience == "" || (config.Auth0Domain == "" && config.IssuerURL == "") {
+		log.Fatalf("Auth0 configuration is incomplete: audience=%q, domain=%q, issuerURL=%q",
+			config.Auth0Audience, config.Auth0Domain, config.IssuerURL)
 	}
 
 	var issuerURL *url.URL
@@ -298,22 +318,26 @@ func ensureValidTokenHandler(config MiddlewareConfig, next http.Handler) http.Ha
 		log.Fatalf("Failed to parse the issuer url: %v", err)
 	}
 
-	provider := jwks.NewCachingProvider(issuerURL, 5*time.Minute)
+	provider, err := jwks.NewCachingProvider(
+		jwks.WithIssuerURL(issuerURL),
+		jwks.WithCacheTTL(5*time.Minute),
+	)
+	if err != nil {
+		log.Fatalf("Failed to set up the jwks provider: %v", err)
+	}
 
 	jwtValidator, err := validator.New(
-		provider.KeyFunc,
-		validator.RS256,
-		issuerURL.String(),
-		[]string{config.Auth0Audience},
-		validator.WithCustomClaims(
-			func() validator.CustomClaims {
-				return &CustomClaims{}
-			},
-		),
+		validator.WithKeyFunc(provider.KeyFunc),
+		validator.WithAlgorithm(validator.RS256),
+		validator.WithIssuer(issuerURL.String()),
+		validator.WithAudience(config.Auth0Audience),
+		validator.WithCustomClaims(func() *CustomClaims {
+			return &CustomClaims{}
+		}),
 		validator.WithAllowedClockSkew(time.Minute),
 	)
 	if err != nil {
-		log.Fatalf("Failed to set up the jwt validator")
+		log.Fatalf("Failed to set up the jwt validator: %v", err)
 	}
 
 	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
@@ -381,17 +405,24 @@ func ensureValidTokenHandler(config MiddlewareConfig, next http.Handler) http.Ha
 
 	tokenExtractor := jwtmiddleware.MultiTokenExtractor(extractors...)
 
-	middleware := jwtmiddleware.New(
-		jwtValidator.ValidateToken,
+	middleware, err := jwtmiddleware.New(
+		jwtmiddleware.WithValidator(jwtValidator),
 		jwtmiddleware.WithErrorHandler(errorHandler),
 		jwtmiddleware.WithTokenExtractor(tokenExtractor),
 	)
+	if err != nil {
+		log.Fatalf("Failed to set up the jwt middleware: %v", err)
+	}
 
 	jwtValidationMiddleware := middleware.CheckJWT(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// extract account name and setup otel attributes after the JWT was validated, but before the actual handler runs
-		claims := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
+		claims, err := jwtmiddleware.GetClaims[*validator.ValidatedClaims](r.Context())
+		if err != nil {
+			errorHandler(w, r, fmt.Errorf("error getting validated claims: %w", err))
+			return
+		}
 
-		token, err := tokenExtractor(r)
+		extractedToken, err := tokenExtractor(r)
 		// we should never hit this as the middleware wouldn't call the handler
 		if err != nil {
 			// This is not ErrJWTMissing because an error here means that the
@@ -411,7 +442,8 @@ func ensureValidTokenHandler(config MiddlewareConfig, next http.Handler) http.Ha
 		// note that the values are looked up in last-in-first-out order, so
 		// there is an absolutely minor perf optimisation to have the context
 		// values set in ascending order of access frequency.
-		ctx = context.WithValue(ctx, UserTokenContextKey{}, token)
+		ctx = context.WithValue(ctx, UserTokenContextKey{}, extractedToken.Token)
+		ctx = context.WithValue(ctx, ValidatedClaimsContextKey{}, claims)
 		ctx = context.WithValue(ctx, CustomClaimsContextKey{}, customClaims)
 		ctx = context.WithValue(ctx, CurrentSubjectContextKey{}, claims.RegisteredClaims.Subject)
 		ctx = context.WithValue(ctx, AccountNameContextKey{}, customClaims.AccountName)
@@ -444,14 +476,8 @@ func ensureValidTokenHandler(config MiddlewareConfig, next http.Handler) http.Ha
 
 		var shouldBypass bool
 
-		// If config.BypassAuth is true then bypass
-		if config.BypassAuth {
-			shouldBypass = true
-		}
-
-		// If we aren't bypassing always and we have a regex then check if we
-		// should bypass
-		if !shouldBypass && config.BypassAuthForPaths != nil {
+		// Check if the request path matches the bypass regex
+		if config.BypassAuthForPaths != nil {
 			shouldBypass = config.BypassAuthForPaths.MatchString(r.URL.Path)
 			if shouldBypass {
 				span.SetAttributes(attribute.String("ovm.auth.bypassedPath", r.URL.Path))
@@ -474,6 +500,48 @@ func ensureValidTokenHandler(config MiddlewareConfig, next http.Handler) http.Ha
 	})
 }
 
+// WithResourceMetadata wraps a handler to include RFC 9728 resource_metadata
+// in the WWW-Authenticate header on 401 responses, enabling MCP clients to
+// discover the authorization server via Protected Resource Metadata.
+func WithResourceMetadata(resourceMetadataURL string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&resourceMetadataWriter{
+			ResponseWriter:      w,
+			resourceMetadataURL: resourceMetadataURL,
+		}, r)
+	})
+}
+
+type resourceMetadataWriter struct {
+	http.ResponseWriter
+	resourceMetadataURL string
+	wroteHeader         bool
+}
+
+func (w *resourceMetadataWriter) WriteHeader(statusCode int) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		if statusCode == http.StatusUnauthorized {
+			w.ResponseWriter.Header().Set("WWW-Authenticate",
+				fmt.Sprintf(`Bearer resource_metadata=%q`, w.resourceMetadataURL))
+		}
+	}
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *resourceMetadataWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Unwrap returns the underlying ResponseWriter, enabling http.ResponseController
+// and middleware that check for optional interfaces (Flusher, Hijacker, etc.).
+func (w *resourceMetadataWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // CustomClaims contains custom data we want from the token.
 type CustomClaims struct {
 	Scope       string `json:"scope"`
@@ -483,13 +551,7 @@ type CustomClaims struct {
 // HasScope checks whether our claims have a specific scope.
 func (c CustomClaims) HasScope(expectedScope string) bool {
 	result := strings.Split(c.Scope, " ")
-	for i := range result {
-		if result[i] == expectedScope {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(result, expectedScope)
 }
 
 // Validate does nothing for this example, but we need
