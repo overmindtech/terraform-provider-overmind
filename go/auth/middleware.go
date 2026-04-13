@@ -15,6 +15,7 @@ import (
 	"github.com/auth0/go-jwt-middleware/v3/jwks"
 	"github.com/auth0/go-jwt-middleware/v3/validator"
 	"github.com/getsentry/sentry-go"
+	"github.com/overmindtech/terraform-provider-overmind/go/audit"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -192,6 +193,18 @@ func NewAuthMiddleware(config MiddlewareConfig, next http.Handler) http.Handler 
 			ctx = OverrideAuth(r.Context(), options...)
 		}
 
+		if ad := audit.AuditDataFromContext(ctx); ad != nil {
+			if sub, ok := ctx.Value(CurrentSubjectContextKey{}).(string); ok {
+				ad.Subject = sub
+			}
+			if account, ok := ctx.Value(AccountNameContextKey{}).(string); ok {
+				ad.AccountName = account
+			}
+			if claims, ok := ctx.Value(CustomClaimsContextKey{}).(*CustomClaims); ok {
+				ad.Scopes = claims.Scope
+			}
+		}
+
 		r = r.Clone(ctx)
 
 		next.ServeHTTP(w, r)
@@ -216,6 +229,14 @@ func WithAccount(account string) OverrideAuthOptionFunc {
 	return withCustomClaims(func(claims *CustomClaims) {
 		claims.AccountName = account
 	})
+}
+
+// Sets the subject (typically the Auth0 user_id from the token's sub claim)
+// in the context.
+func WithSubject(subject string) OverrideAuthOptionFunc {
+	return func(ctx context.Context) context.Context {
+		return context.WithValue(ctx, CurrentSubjectContextKey{}, subject)
+	}
 }
 
 // Sets the auth info in the context directly from the validated claims produced
@@ -296,7 +317,7 @@ func ensureValidTokenHandler(config MiddlewareConfig, next http.Handler) http.Ha
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			span := trace.SpanFromContext(r.Context())
 			span.SetAttributes(attribute.Bool("ovm.auth.bypass", true))
-			ctx := OverrideAuth(r.Context(), WithBypassScopeCheck())
+			ctx := OverrideAuth(r.Context(), WithBypassScopeCheck(), WithSubject("auth-bypass"))
 			next.ServeHTTP(w, r.Clone(ctx))
 		})
 	}
@@ -487,7 +508,7 @@ func ensureValidTokenHandler(config MiddlewareConfig, next http.Handler) http.Ha
 		span.SetAttributes(attribute.Bool("ovm.auth.bypass", shouldBypass))
 
 		if shouldBypass {
-			ctx = OverrideAuth(ctx, WithBypassScopeCheck())
+			ctx = OverrideAuth(ctx, WithBypassScopeCheck(), WithSubject("auth-bypass"))
 
 			r = r.Clone(ctx)
 

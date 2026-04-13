@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"github.com/auth0/go-jwt-middleware/v3/validator"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/overmindtech/terraform-provider-overmind/go/audit"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -448,6 +450,124 @@ func TestNewAuthMiddleware(t *testing.T) {
 	}
 }
 
+// TestBypassAuthInjectsSubject verifies the BypassAuth code path (local/dev
+// environments only — never runs in production where real JWTs provide the
+// subject). It ensures a synthetic "auth-bypass" subject is injected into
+// CurrentSubjectContextKey so handlers like Area51 job scheduling and feature
+// flags work without a JWT.
+func TestBypassAuthInjectsSubject(t *testing.T) {
+	t.Parallel()
+
+	bypassConfig := MiddlewareConfig{
+		BypassAuth: true,
+	}
+
+	var capturedSubject string
+	handler := NewAuthMiddleware(bypassConfig, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subj, ok := r.Context().Value(CurrentSubjectContextKey{}).(string); ok {
+			capturedSubject = subj
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	t.Run("injects default subject", func(t *testing.T) {
+		capturedSubject = ""
+		rr := httptest.NewRecorder()
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+		if capturedSubject != "auth-bypass" {
+			t.Errorf("expected subject %q, got %q", "auth-bypass", capturedSubject)
+		}
+	})
+
+	t.Run("scope check is bypassed", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		scopeHandler := NewAuthMiddleware(bypassConfig, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !HasAllScopes(r.Context(), "any:scope") {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		scopeHandler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200 (scope check bypassed), got %d", rr.Code)
+		}
+	})
+}
+
+func TestWithSubject(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sets subject in context", func(t *testing.T) {
+		ctx := OverrideAuth(context.Background(), WithSubject("auth0|user-123"))
+
+		subject, ok := ctx.Value(CurrentSubjectContextKey{}).(string)
+		if !ok {
+			t.Fatal("expected CurrentSubjectContextKey to be set")
+		}
+		if subject != "auth0|user-123" {
+			t.Errorf("expected subject %q, got %q", "auth0|user-123", subject)
+		}
+	})
+
+	t.Run("last WithSubject wins", func(t *testing.T) {
+		ctx := OverrideAuth(context.Background(),
+			WithSubject("first"),
+			WithSubject("second"),
+		)
+
+		subject, ok := ctx.Value(CurrentSubjectContextKey{}).(string)
+		if !ok {
+			t.Fatal("expected CurrentSubjectContextKey to be set")
+		}
+		if subject != "second" {
+			t.Errorf("expected subject %q, got %q", "second", subject)
+		}
+	})
+
+	t.Run("composes with other options", func(t *testing.T) {
+		ctx := OverrideAuth(context.Background(),
+			WithScope("api:read"),
+			WithAccount("test-account"),
+			WithSubject("auth0|user-456"),
+		)
+
+		subject, ok := ctx.Value(CurrentSubjectContextKey{}).(string)
+		if !ok {
+			t.Fatal("expected CurrentSubjectContextKey to be set")
+		}
+		if subject != "auth0|user-456" {
+			t.Errorf("expected subject %q, got %q", "auth0|user-456", subject)
+		}
+
+		accountName, err := ExtractAccount(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if accountName != "test-account" {
+			t.Errorf("expected account %q, got %q", "test-account", accountName)
+		}
+
+		if !HasAllScopes(ctx, "api:read") {
+			t.Error("expected api:read scope to be present")
+		}
+	})
+}
+
 func TestOverrideAuth(t *testing.T) {
 	tests := []struct {
 		Name           string
@@ -553,7 +673,6 @@ func BenchmarkAuthMiddleware(b *testing.B) {
 		// Create a request to pass to our handler. We don't have any query parameters for now, so we'll
 		// pass 'nil' as the third parameter.
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
-
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -595,7 +714,6 @@ func NewTestJWTServer() (*TestJWTServer, error) {
 		Key:       jwk,
 	}
 	signer, err := jose.NewSigner(signingKey, &jose.SignerOptions{})
-
 	if err != nil {
 		return nil, err
 	}
@@ -876,4 +994,142 @@ func TestConnectErrorHandling(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAuthMiddleware_PopulatesAuditData(t *testing.T) {
+	server, err := NewTestJWTServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jwksURL := server.Start(t.Context())
+
+	discardLogger := log.New()
+	discardLogger.SetOutput(io.Discard)
+
+	t.Run("populates audit data from JWT", func(t *testing.T) {
+		var capturedAD *audit.AuditData
+
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedAD = audit.AuditDataFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := audit.NewAuditMiddleware(discardLogger)(
+			NewAuthMiddleware(MiddlewareConfig{
+				IssuerURL:     jwksURL,
+				Auth0Audience: "https://api.overmind.tech",
+			}, inner),
+		)
+
+		token, err := server.GenerateJWT(&TestTokenOptions{
+			Audience: []string{"https://api.overmind.tech"},
+			Expiry:   time.Now().Add(time.Hour),
+			CustomClaims: CustomClaims{
+				AccountName: "acme-corp",
+				Scope:       "read:items write:items",
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/test", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+		if capturedAD == nil {
+			t.Fatal("expected audit data to be present in context")
+		}
+		if capturedAD.Subject != "test" {
+			t.Errorf("expected subject 'test', got %q", capturedAD.Subject)
+		}
+		if capturedAD.AccountName != "acme-corp" {
+			t.Errorf("expected account 'acme-corp', got %q", capturedAD.AccountName)
+		}
+		if capturedAD.Scopes != "read:items write:items" {
+			t.Errorf("expected scopes 'read:items write:items', got %q", capturedAD.Scopes)
+		}
+	})
+
+	t.Run("populates audit data with account override", func(t *testing.T) {
+		var capturedAD *audit.AuditData
+
+		override := "override-acme"
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedAD = audit.AuditDataFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := audit.NewAuditMiddleware(discardLogger)(
+			NewAuthMiddleware(MiddlewareConfig{
+				IssuerURL:       jwksURL,
+				Auth0Audience:   "https://api.overmind.tech",
+				AccountOverride: &override,
+			}, inner),
+		)
+
+		token, err := server.GenerateJWT(&TestTokenOptions{
+			Audience: []string{"https://api.overmind.tech"},
+			Expiry:   time.Now().Add(time.Hour),
+			CustomClaims: CustomClaims{
+				AccountName: "original-acme",
+				Scope:       "read:items",
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/test", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+		if capturedAD == nil {
+			t.Fatal("expected audit data to be present in context")
+		}
+		if capturedAD.AccountName != "override-acme" {
+			t.Errorf("expected overridden account 'override-acme', got %q", capturedAD.AccountName)
+		}
+	})
+
+	t.Run("works without audit context", func(t *testing.T) {
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := NewAuthMiddleware(MiddlewareConfig{
+			IssuerURL:     jwksURL,
+			Auth0Audience: "https://api.overmind.tech",
+		}, inner)
+
+		token, err := server.GenerateJWT(&TestTokenOptions{
+			Audience: []string{"https://api.overmind.tech"},
+			Expiry:   time.Now().Add(time.Hour),
+			CustomClaims: CustomClaims{
+				AccountName: "acme-corp",
+				Scope:       "read:items",
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/test", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 (no panic without audit context), got %d", rr.Code)
+		}
+	})
 }
